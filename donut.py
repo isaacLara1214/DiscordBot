@@ -12,44 +12,55 @@ def run_bot():
     intents.message_content = True
     client = commands.Bot(command_prefix='?', intents=intents)
 
+    is_playing = False
+    is_paused = False
+
     queues = {}
     voice_clients = {}
-    yt_dl_options = {"format": "bestaudio/best"}
+    yt_dl_options = {"format": "best audio/best"}
     ytdl = yt_dlp.YoutubeDL(yt_dl_options)
 
-    ffmpeg_options = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-                      'options': '-vn -filter:a "volume=0.25"'}
+    ffmpeg_options = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
 
     @client.event
     async def on_ready():
         print('Bot is ready.')
 
     async def play_next(ctx):
-        if queues[ctx.guild.id] != {}:
-            link = queue[ctx.guild.id].pop(0)
+        if queues[ctx.guild.id]:
+            link = queues[ctx.guild.id].pop(0)
             await play(ctx, link)
 
-    @client.command(name="play")
+    @client.command(name="play", help="Plays a song")
     async def play(ctx, link):
-        try:
-            voice_client = await ctx.author.voice.channel.connect()
-            voice_clients[voice_client.guild.id] = voice_client
-        except Exception as e:
-            print(e)
+        if ctx.guild.id not in queues:
+            queues[ctx.guild.id] = []
 
-        try:
-            loop = asyncio.get_event_loop()
-            data = await loop.run_in_executor(None, lambda: ytdl.extract_info(link, download=False))
-            song = data['url']
-            player = discord.FFmpegOpusAudio(song, **ffmpeg_options)
-            voice_clients[ctx.guild.id].play(player, after=lambda i: asyncio.run_coroutine_threadsafe(play_next(ctx),
-                                                                                                      client.loop))
-        except Exception as e:
-            print(e)
+        if not voice_clients.get(ctx.guild.id):
+            try:
+                voice_client = await ctx.author.voice.channel.connect()
+                voice_clients[voice_client.guild.id] = voice_client
+            except Exception as e:
+                print(e)
+
+        if not voice_clients[ctx.guild.id].is_playing():
+            try:
+                loop = asyncio.get_event_loop()
+                data = await loop.run_in_executor(None, lambda: ytdl.extract_info(link, download=False))
+                song = data['url']
+                player = discord.FFmpegOpusAudio(song, **ffmpeg_options)
+                voice_clients[ctx.guild.id].play(player,
+                                                 after=lambda i: asyncio.run_coroutine_threadsafe(play_next(ctx),
+                                                                                                  client.loop))
+            except Exception as e:
+                print(e)
+        else:
+            queues[ctx.guild.id].append(link)
+            await ctx.send("Added to queue!")
 
     @client.command(name="clear")
     async def clear(ctx):
-        if ctx.guild.id not in queues:
+        if ctx.guild.id in queues:
             queues[ctx.guild.id].clear()
             await ctx.send('Cleared.')
         else:
@@ -59,7 +70,7 @@ def run_bot():
     async def pause(ctx):
         try:
             voice_clients[ctx.guild.id].pause()
-            message = await ctx.channel.send('Paused music')
+            await ctx.send("Paused music")
         except Exception as e:
             print(e)
 
@@ -67,7 +78,7 @@ def run_bot():
     async def resume(ctx):
         try:
             voice_clients[ctx.guild.id].resume()
-            message = await ctx.channel.send('Resumed music')
+            await ctx.send("Resumed music!")
         except Exception as e:
             print(e)
 
